@@ -4,6 +4,10 @@ __pycache__/
 .idea/
 *.egg-info/
 .claude
+mlflow.db
+mlflow.db.bak
+mlflow_backup.db
+mlruns/
 
 # Fichiers raw volumineuses (telecharges automatiquement par pipeline.py)
 # data/raw/ est versionne (fichiers manuels Excel)
