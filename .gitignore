@@ -3,7 +3,7 @@ __pycache__/
 *.pyc
 .idea/
 *.egg-info/
-.claude
+
 
 # Fichiers raw volumineuses (telecharges automatiquement par pipeline.py)
 # data/raw/ est versionne (fichiers manuels Excel)
