@@ -1,0 +1,10 @@
+scenario,annee,temp_proj_C,anomalie_C
+optimiste,2030,13.65,2.54
+optimiste,2050,13.33,2.22
+optimiste,2100,12.51,1.4
+intermediaire,2030,13.74,2.63
+intermediaire,2050,13.76,2.65
+intermediaire,2100,13.81,2.7
+pessimiste,2030,13.85,2.74
+pessimiste,2050,14.33,3.22
+pessimiste,2100,15.51,4.4
