@@ -1,0 +1,9 @@
+venv/
+__pycache__/
+*.pyc
+.idea/
+*.egg-info/
+
+# Fichiers raw volumineuses (telecharges automatiquement par pipeline.py)
+# data/raw/ est versionne (fichiers manuels Excel)
+# data/clean/ est versionne (outputs du pipeline)
