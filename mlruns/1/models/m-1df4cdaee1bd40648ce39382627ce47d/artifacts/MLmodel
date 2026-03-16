@@ -1,0 +1,21 @@
+artifact_path: file:C:/Users/kimi0/IdeaProjects/HackatonSupDeVinci/mlruns/1/models/m-1df4cdaee1bd40648ce39382627ce47d/artifacts
+flavors:
+  prophet:
+    code: null
+    data: model.pr
+    model_type: Prophet
+    prophet_version: 1.3.0
+  python_function:
+    data: model.pr
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.prophet
+    python_version: 3.12.6
+mlflow_version: 3.10.1
+model_id: m-1df4cdaee1bd40648ce39382627ce47d
+model_size_bytes: 18029
+model_uuid: m-1df4cdaee1bd40648ce39382627ce47d
+prompts: null
+run_id: 409ea2e9dd674f21bd992d7037f7698c
+utc_time_created: '2026-03-16 21:18:41.530957'
