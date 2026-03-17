@@ -153,8 +153,8 @@ with tab1:
                 "Réf. pré-industrielle : ~280 ppm")
     col3.metric("Niveau de la mer",        f"+{niveau_actuel:.0f} mm" if niveau_actuel else "—",
                 "Hausse totale depuis 1900")
-    col4.metric("Empreinte carbone",       f"{empreinte_actuelle:.1f} t CO₂/hab" if empreinte_actuelle else "—",
-                "Objectif : moins de 2 t/hab")
+    col4.metric("Empreinte individuelle", f"{empreinte_actuelle:.1f} t CO₂/hab" if empreinte_actuelle else "—",
+                "Objectif 2050 : 2 t/hab")
 
     # Ligne 2 — 4 KPI supplémentaires
     # On prend la dernière valeur > 0 et l'année correspondante
@@ -174,6 +174,7 @@ with tab1:
     jours_gel_actuel,    an_gel        = last_valid("jours_gel", exclude_current_year=True)
     vendanges_actuel,    an_vendanges  = last_valid("jour_vendanges")
     catastrophes_actuel, an_catastro   = last_valid("dommages_Mrd_USD")
+    ges_actuel,          an_ges        = last_valid("ges_total_MtCO2eq")
 
     col5, col6, col7, col8 = st.columns(4)
     col5.metric("Jours chauds ≥ 30°C",   f"{jours_chauds_actuel:.0f} j/an" if pd.notna(jours_chauds_actuel) else "—",
@@ -189,6 +190,12 @@ with tab1:
                 f"Plus tôt = été chaud ({an_vendanges})" if an_vendanges else "—")
     col8.metric("Coût des catastrophes", f"{catastrophes_actuel:.1f} Mrd $" if pd.notna(catastrophes_actuel) else "—",
                 f"Total annuel France ({an_catastro})" if an_catastro else "—")
+
+    # Ligne 3 — émissions totales tous secteurs
+    col9, _, _, _ = st.columns(4)
+    col9.metric("Émissions GES totales",
+                f"{ges_actuel:.0f} Mt CO₂eq" if pd.notna(ges_actuel) else "—",
+                f"Tous secteurs France ({an_ges})" if an_ges else "—")
 
     st.divider()
 
