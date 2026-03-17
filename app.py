@@ -149,8 +149,10 @@ with tab1:
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Température moyenne",     f"{temp_recente:.1f} °C",
                 f"+{hausse_temp:.2f}°C depuis 1900")
-    col2.metric("CO₂ atmosphérique",       f"{co2_actuel:.0f} ppm" if co2_actuel else "—",
-                "Réf. pré-industrielle : ~280 ppm")
+    co2_delta = round(co2_actuel - 280) if co2_actuel else None
+    col2.metric("CO₂ dans l'air",
+                f"{co2_actuel:.0f} ppm" if co2_actuel else "—",
+                f"+{co2_delta} ppm vs avant l'ère industrielle" if co2_delta else "—")
     col3.metric("Niveau de la mer",        f"+{niveau_actuel:.0f} mm" if niveau_actuel else "—",
                 "Hausse totale depuis 1900")
     col4.metric("Empreinte individuelle", f"{empreinte_actuelle:.1f} t CO₂/hab" if empreinte_actuelle else "—",
