@@ -372,7 +372,7 @@ with tab2:
 
 with tab3:
     st.header("Hausse du niveau de la mer — ports français")
-    st.caption("Hausse du niveau de la mer en mm depuis 1900 (1900 = 0 mm, point de départ). Chaque valeur indique de combien le niveau a monté depuis 1900. Cliquer sur un port pour le détail.")
+    st.caption("Hausse du niveau de la mer en mm depuis 1900. Cliquer sur un port pour le détail.")
 
     col_m, col_leg = st.columns([3, 1])
 
