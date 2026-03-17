@@ -133,8 +133,8 @@ LABELS_SC   = {"optimiste": "Optimiste +1.4°C", "intermediaire": "Intermédiair
 # ONGLETS
 # ==============================================================================
 
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-    "Vue d'ensemble", "Historique", "Carte", "Projections", "Alertes", "Que faire ?"
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    "Vue d'ensemble", "Historique", "Carte", "Projections", "Modeles IA", "Alertes", "Que faire ?"
 ])
 
 
@@ -144,16 +144,50 @@ with tab1:
     st.header("Le climat en France")
     st.caption(f"Dernière observation : {annee_recente} — scénario affiché : {LABELS_SC[scenario_choisi]}")
 
-    # Métriques principales avec les composants natifs Streamlit
+    # Ligne 1 — 4 KPI climatiques
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Température moyenne",     f"{temp_recente:.1f} °C",
-                f"+{hausse_temp:.2f}°C depuis 1900-1920")
+                f"+{hausse_temp:.2f}°C depuis 1900")
     col2.metric("CO₂ atmosphérique",       f"{co2_actuel:.0f} ppm" if co2_actuel else "—",
                 "Réf. pré-industrielle : ~280 ppm")
     col3.metric("Niveau de la mer",        f"+{niveau_actuel:.0f} mm" if niveau_actuel else "—",
-                "Par rapport à 1961-1990")
+                "Hausse totale depuis 1900")
     col4.metric("Empreinte carbone",       f"{empreinte_actuelle:.1f} t CO₂/hab" if empreinte_actuelle else "—",
                 "Objectif : moins de 2 t/hab")
+
+    # Ligne 2 — 4 KPI supplémentaires
+    # On prend la dernière valeur > 0 et l'année correspondante
+    def last_valid(col, exclude_current_year=False):
+        if col not in df.columns:
+            return None, None
+        s = df[["annee", col]].dropna(subset=[col])
+        s = s[s[col] > 0]
+        if exclude_current_year:
+            import datetime as dt
+            s = s[s["annee"] < dt.date.today().year]
+        if s.empty:
+            return None, None
+        return s.iloc[-1][col], int(s.iloc[-1]["annee"])
+
+    jours_chauds_actuel, an_chauds     = last_valid("jours_chauds_30", exclude_current_year=True)
+    jours_gel_actuel,    an_gel        = last_valid("jours_gel", exclude_current_year=True)
+    vendanges_actuel,    an_vendanges  = last_valid("jour_vendanges")
+    catastrophes_actuel, an_catastro   = last_valid("dommages_Mrd_USD")
+
+    col5, col6, col7, col8 = st.columns(4)
+    col5.metric("Jours chauds ≥ 30°C",   f"{jours_chauds_actuel:.0f} j/an" if pd.notna(jours_chauds_actuel) else "—",
+                f"Moyenne nationale ({an_chauds})" if an_chauds else "—")
+    col6.metric("Jours de gel ≤ 0°C",    f"{jours_gel_actuel:.0f} j/an"    if pd.notna(jours_gel_actuel)    else "—",
+                f"Moyenne nationale ({an_gel})" if an_gel else "—")
+    if pd.notna(vendanges_actuel):
+        import datetime
+        date_vendanges = (datetime.date(2024, 1, 1) + datetime.timedelta(days=int(vendanges_actuel) - 1)).strftime("%d %b").lstrip("0")
+    else:
+        date_vendanges = "—"
+    col7.metric("Début des vendanges",    date_vendanges,
+                f"Plus tôt = été chaud ({an_vendanges})" if an_vendanges else "—")
+    col8.metric("Coût des catastrophes", f"{catastrophes_actuel:.1f} Mrd $" if pd.notna(catastrophes_actuel) else "—",
+                f"Total annuel France ({an_catastro})" if an_catastro else "—")
 
     st.divider()
 
@@ -163,14 +197,14 @@ with tab1:
         st.subheader("Température — passé et futur")
         fig = go.Figure()
 
-        df_ht = df_temp_completes[["annee", "temp_moy_france"]]
+        df_ht = df_filtre[["annee", "temp_moy_france"]].dropna()
         fig.add_trace(go.Scatter(
             x=df_ht["annee"], y=df_ht["temp_moy_france"],
             mode="lines", name="Mesures réelles",
-            line=dict(color="white", width=1.5)
+            line=dict(color="#4FC3F7", width=2)
         ))
         fig.add_hline(y=baseline, line_dash="dot", line_color="#888",
-                      annotation_text=f"Niveau 1900-1920 ({baseline:.1f}°C)")
+                      annotation_text=f"Niveau de référence 1900-1920 ({baseline:.1f}°C)")
 
         if "temperature" in forecasts:
             fc = forecasts["temperature"]
@@ -207,7 +241,7 @@ with tab1:
     with col_co2:
         st.subheader("CO₂ dans l'atmosphère")
         if "co2_ppm" in df.columns:
-            df_co2 = df[["annee", "co2_ppm"]].dropna()
+            df_co2 = df_filtre[["annee", "co2_ppm"]].dropna()
             fig2 = go.Figure()
             fig2.add_trace(go.Scatter(
                 x=df_co2["annee"], y=df_co2["co2_ppm"],
@@ -240,6 +274,7 @@ with tab2:
         "Empreinte carbone (t CO₂/hab)":    "empreinte_tCO2_hab",
         "Date de vendanges (jour de l'an)": "jour_vendanges",
         "Coût des catastrophes (Mrd USD)":  "dommages_Mrd_USD",
+        "Émissions GES total (Mt CO₂eq)":  "ges_total_MtCO2eq",
     }
     VARIABLES = {k: v for k, v in VARIABLES.items() if v in df.columns}
 
@@ -252,7 +287,7 @@ with tab2:
     with col_a:
         var_label = st.selectbox("Indicateur", list(VARIABLES.keys()))
     with col_b:
-        show_proj = st.checkbox("Afficher la projection", value=True)
+        show_proj = st.checkbox("Afficher la pour ", value=True)
 
     col_y  = VARIABLES[var_label]
     nom_fc = MAP_FC.get(col_y)
@@ -299,12 +334,44 @@ with tab2:
     c3.metric("Moyenne",      f"{df_var[col_y].mean():.2f}")
     c4.metric("Année record", str(int(df_var.loc[df_var[col_y].idxmax(), "annee"])))
 
+    # ── Graphique GES par secteur ──────────────────────────────────────────────
+    COLS_SECTEURS = {
+        "industrie_energie":                      "Industrie énergie",
+        "industrie_manufacturiere_construction":  "Industrie manuf.",
+        "traitement_centralise_dechets":          "Déchets",
+        "batiments_residentiel_tertiaire":        "Bâtiments",
+        "agriculture":                            "Agriculture",
+        "transports":                             "Transports",
+        "emissions_naturelles":                   "Émissions naturelles",
+        "emnr":                                   "EMNR",
+    }
+    secteurs_dispo = [c for c in COLS_SECTEURS if c in df.columns]
+    if secteurs_dispo:
+        st.divider()
+        st.subheader("Émissions GES par secteur (Mt CO₂eq)")
+        df_ges_filtre = df_filtre[["annee"] + secteurs_dispo].dropna(subset=secteurs_dispo, how="all")
+        COULEURS_GES = ["#f87171","#fb923c","#fbbf24","#4ade80","#34d399","#60a5fa","#a78bfa","#f472b6"]
+        fig_ges = go.Figure()
+        for col_s, coul_s in zip(secteurs_dispo, COULEURS_GES):
+            df_s = df_ges_filtre[["annee", col_s]].dropna()
+            fig_ges.add_trace(go.Scatter(
+                x=df_s["annee"], y=df_s[col_s],
+                mode="lines", name=COLS_SECTEURS[col_s],
+                stackgroup="one", line=dict(color=coul_s, width=0.5),
+                fillcolor=coul_s
+            ))
+        fig_ges.update_layout(template="plotly_dark", height=400,
+                              xaxis_title="Année", yaxis_title="Mt CO₂eq",
+                              legend=dict(orientation="h", y=-0.3),
+                              margin=dict(l=40, r=20, t=10, b=100))
+        st.plotly_chart(fig_ges, use_container_width=True)
+
 
 # ── TAB 3 : CARTE ─────────────────────────────────────────────────────────────
 
 with tab3:
     st.header("Hausse du niveau de la mer — ports français")
-    st.caption("Anomalie en millimètres par rapport à la période 1961-1990. Cliquer sur un port pour le détail.")
+    st.caption("Hausse du niveau de la mer en mm depuis 1900 (1900 = 0 mm, point de départ). Chaque valeur indique de combien le niveau a monté depuis 1900. Cliquer sur un port pour le détail.")
 
     col_m, col_leg = st.columns([3, 1])
 
@@ -329,7 +396,7 @@ with tab3:
             else:
                 couleur = "#4d9fff" if n < 50 else ("#ffa500" if n < 100 else "#ff5050")
                 rayon   = max(5, min(20, abs(n) / 8))
-                txt     = f"<b>{port['ville']}</b><br>+{n:.0f} mm depuis 1961-1990"
+                txt     = f"<b>{port['ville']}</b><br>+{n:.0f} mm de hausse depuis 1900"
             folium.CircleMarker(
                 location=[port["lat"], port["lon"]], radius=rayon,
                 color=couleur, fill=True, fill_color=couleur, fill_opacity=0.7,
@@ -371,7 +438,7 @@ with tab4:
                                       marker=dict(size=9)))
 
         fig4.add_hline(y=baseline, line_dash="dot", line_color="#555",
-                       annotation_text=f"Niveau 1900-1920 ({baseline:.1f}°C)")
+                       annotation_text=f"Niveau de référence 1900-1920 ({baseline:.1f}°C)")
         fig4.add_vline(x=annee_projection, line_dash="dash", line_color="#666",
                        annotation_text=str(annee_projection))
 
@@ -389,7 +456,7 @@ with tab4:
             row = df_sc[df_sc["annee"] <= annee_projection].iloc[-1]
             col_w.metric(LABELS_SC[sc],
                          f"{row['temp_proj_C']:.1f} °C",
-                         f"+{row['anomalie_C']:.2f}°C vs 1900-1920")
+                         f"+{row['anomalie_C']:.2f}°C depuis 1900")
 
     st.divider()
     st.subheader("Autres indicateurs projetés")
@@ -422,10 +489,102 @@ with tab4:
                                     yaxis=dict(showgrid=False))
                 st.plotly_chart(fig_m, use_container_width=True)
 
-
-# ── TAB 5 : ALERTES ───────────────────────────────────────────────────────────
+# ── TAB 5 : MODELES IA ────────────────────────────────────────────────────────
 
 with tab5:
+    st.header("Comparaison des modèles prédictifs")
+    st.caption("Validation walk-forward : entraînement sur le passé, évaluation sur le futur.")
+
+    path_csv = "data/resultats/comparaison_modeles.csv"
+    path_png = "data/resultats/comparaison_modeles.png"
+
+    if not os.path.exists(path_csv):
+        st.warning("Lance d'abord `python modele_comparaison.py` pour générer les résultats.")
+    else:
+        df_comp = pd.read_csv(path_csv)
+
+        # ── Explication des modèles ──────────────────────────────────────────
+        st.subheader("Les 3 modèles comparés")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.markdown("**Régression Linéaire**")
+            st.markdown("Modèle le plus simple : une droite de tendance `y = a × année + b`. "
+                        "Rapide et explicable. Performant quand la tendance est constante.")
+        with c2:
+            st.markdown("**ARIMA(1,1,1)**")
+            st.markdown("Modèle classique de séries temporelles. Capture les corrélations "
+                        "entre années successives. Très efficace sur les séries régulières comme le CO₂.")
+        with c3:
+            st.markdown("**Prophet (Meta)**")
+            st.markdown("Modèle avancé de décomposition de tendance. Robuste aux valeurs "
+                        "manquantes et aux changements de tendance. Meilleur sur la température.")
+
+        st.divider()
+
+        # ── Tableau des métriques ────────────────────────────────────────────
+        st.subheader("Performances — RMSE et MAPE par variable")
+        st.caption("RMSE : erreur en unité de la variable (plus bas = meilleur). "
+                   "MAPE : erreur en % (permet de comparer des variables d'unités différentes).")
+
+        LABELS_MODELES = {
+            "regression_lineaire": "Régression Linéaire",
+            "arima":               "ARIMA(1,1,1)",
+            "prophet":             "Prophet",
+        }
+        df_comp["modele"] = df_comp["modele"].map(LABELS_MODELES).fillna(df_comp["modele"])
+
+        pivot_rmse = df_comp.pivot(index="variable", columns="modele", values="rmse").round(4)
+        pivot_mape = df_comp.pivot(index="variable", columns="modele", values="mape").round(2)
+
+        col_r, col_m = st.columns(2)
+        with col_r:
+            st.markdown("**RMSE**")
+            st.dataframe(pivot_rmse, use_container_width=True)
+        with col_m:
+            st.markdown("**MAPE (%)**")
+            st.dataframe(pivot_mape, use_container_width=True)
+
+        st.divider()
+
+        # ── Graphique barres ─────────────────────────────────────────────────
+        st.subheader("Visualisation comparative — RMSE")
+        COULEURS_MODELES = {
+            "Régression Linéaire": "#60a5fa",
+            "ARIMA(1,1,1)":        "#fb923c",
+            "Prophet":             "#4ade80",
+        }
+        fig_comp = go.Figure()
+        for modele in df_comp["modele"].unique():
+            df_m = df_comp[df_comp["modele"] == modele]
+            fig_comp.add_trace(go.Bar(
+                name=modele,
+                x=df_m["variable"],
+                y=df_m["rmse"],
+                marker_color=COULEURS_MODELES.get(modele, "#888"),
+            ))
+        fig_comp.update_layout(
+            template="plotly_dark", barmode="group", height=380,
+            xaxis_title="Variable", yaxis_title="RMSE (plus bas = meilleur)",
+            legend=dict(orientation="h", y=-0.25),
+            margin=dict(l=40, r=20, t=10, b=80)
+        )
+        st.plotly_chart(fig_comp, use_container_width=True)
+
+        # ── Meilleur modèle par variable ─────────────────────────────────────
+        st.divider()
+        st.subheader("Meilleur modèle par variable")
+        for var in df_comp["variable"].unique():
+            df_v = df_comp[df_comp["variable"] == var].dropna(subset=["rmse"])
+            if not df_v.empty:
+                meilleur = df_v.loc[df_v["rmse"].idxmin(), "modele"]
+                rmse_val = df_v["rmse"].min()
+                mape_val = df_v.loc[df_v["rmse"].idxmin(), "mape"]
+                st.markdown(f"**{var}** → {meilleur} "
+                            f"(RMSE={rmse_val:.4f}, MAPE={mape_val:.2f}%)")
+
+# ── TAB 6 : ALERTES ───────────────────────────────────────────────────────────
+
+with tab6:
     st.header("Où en est-on ?")
     st.caption("Comparaison des valeurs actuelles aux seuils définis par l'Accord de Paris et le GIEC.")
 
@@ -454,7 +613,7 @@ with tab5:
     afficher_alerte("CO₂ dans l'atmosphère",  co2_actuel,         400, 450, "ppm",
         "400 ppm franchi en 2013 — 450 ppm correspond à un réchauffement de +2°C")
     afficher_alerte("Hausse du niveau de la mer", niveau_actuel,  100, 200, "mm",
-        "Anomalie par rapport à 1961-1990 — +10 cm : seuil orange, +20 cm : seuil rouge")
+        "Hausse depuis 1900 (réf. 1961-1990) — +10 cm : seuil orange, +20 cm : seuil rouge")
     afficher_alerte("Empreinte carbone par personne", empreinte_actuelle, 5, 9, "t CO₂",
         "Objectif ADEME pour 2050 : moins de 2 t par personne")
 
@@ -467,7 +626,7 @@ with tab5:
         delta={"reference": 1.5, "valueformat": ".2f",
                "increasing": {"color": "#f87171"},
                "decreasing": {"color": "#4ade80"}},
-        title={"text": "Hausse de température depuis 1900-1920 (°C)"},
+        title={"text": "Hausse de température depuis 1900 (°C)"},
         gauge={
             "axis": {"range": [0, 4.5], "tickwidth": 1},
             "bar":  {"color": "#fb923c"},
@@ -486,10 +645,9 @@ with tab5:
     st.plotly_chart(fig_j, use_container_width=True)
     st.caption("La ligne blanche marque le seuil critique de +2°C fixé par le GIEC.")
 
+# ── TAB 7 : PRÉCONISATIONS CITOYENNES ─────────────────────────────────────────
 
-# ── TAB 6 : PRÉCONISATIONS CITOYENNES ─────────────────────────────────────────
-
-with tab6:
+with tab7:
     st.header("Que pouvons-nous faire ?")
     st.caption(
         "Préconisations issues du **Plan National d'Adaptation au Changement Climatique (PNACC-3)**, "
@@ -697,3 +855,5 @@ with tab6:
         "[Nos Gestes Climat](https://nosgestesclimat.fr) · "
         "[Earth Action Report 2025](https://www.unep.org)"
     )
+
+

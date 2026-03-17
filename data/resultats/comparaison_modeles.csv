@@ -1,0 +1,13 @@
+variable,modele,rmse,mae,mape
+temperature,regression_lineaire,0.6508,0.5382,4.15
+temperature,arima,0.6664,0.5721,4.44
+temperature,prophet,0.5692,0.473,3.71
+co2,regression_lineaire,8.7395,8.3971,2.08
+co2,arima,1.0499,0.8623,0.22
+co2,prophet,1.3988,1.2208,0.3
+niveau_mer,regression_lineaire,29.6792,21.6054,30.15
+niveau_mer,arima,31.7693,23.3918,29.44
+niveau_mer,prophet,29.8743,21.8417,30.59
+vendanges,regression_lineaire,0.6115,0.4978,0.19
+vendanges,arima,0.7115,0.5521,0.21
+vendanges,prophet,0.6717,0.5415,0.21

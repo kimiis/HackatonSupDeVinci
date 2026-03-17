@@ -489,17 +489,15 @@ def charger_niveau_mer():
             # Étape 1 : Moyenne mensuelle → annuelle pour ce port
             df_a = df.groupby("annee")["hauteur_mm"].mean()
 
-            # Étape 2 : Centrage sur 1961-1990
-            # On vérifie qu'on a au minimum 5 années de référence (seuil minimum
-            # pour que la moyenne de référence soit statistiquement valide).
-            ref_mask = (df_a.index >= 1961) & (df_a.index <= 1990)
-            if ref_mask.sum() >= 5:
-                # Soustraction de la moyenne de référence → anomalie en mm
-                df_a = df_a - df_a[ref_mask].mean()
-                series.append(df_a.rename(ville))
-                print(f"   OK {ville} (ID={pid}) : {int(df_a.index.min())}-{int(df_a.index.max())}")
+            # Étape 2 : Centrage sur l'année 1900 (ou la première année disponible)
+            # → 1900 = 0 mm, chaque valeur suivante = hausse totale depuis 1900 en mm.
+            if 1900 in df_a.index:
+                ref_val = df_a.loc[1900]
             else:
-                print(f"   [!] {ville} (ID={pid}) : pas assez de donnees ref 1961-1990, ignore")
+                ref_val = df_a.iloc[0]  # première année disponible si pas de données en 1900
+            df_a = df_a - ref_val
+            series.append(df_a.rename(ville))
+            print(f"   OK {ville} (ID={pid}) : {int(df_a.index.min())}-{int(df_a.index.max())}")
         except Exception as e:
             print(f"   [!] {ville} (ID={pid}) : {e}")
 
@@ -545,7 +543,7 @@ def charger_niveau_mer():
 #                  incluant les importations, contrairement aux émissions territoriales)
 #
 # TRANSFORMATION :
-#   1. Lecture du fichier Excel en mémoire (io.BytesIO évite de sauvegarder en local)
+#   1. Lecture du fichier Excel en mémoire
 #   2. Extraction des lignes/colonnes utiles par position (iloc)
 #   3. Estimation de la population française par interpolation linéaire
 #      sur 5 points de référence INSEE connus (1990, 2000, 2010, 2020, 2024)
