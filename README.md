@@ -10,7 +10,7 @@ Données officielles exclusivement : Météo France, NOAA, CITEPA, PSMSL, INSEE,
 ### 1. Installer les dépendances
 
 ```bash
-pip install pandas requests openpyxl prophet matplotlib mlflow streamlit plotly folium streamlit-folium
+pip install pandas requests openpyxl prophet matplotlib mlflow streamlit plotly folium streamlit-folium xgboost scikit-learn statsmodels
 ```
 
 ### 2. Générer le dataset
@@ -21,13 +21,15 @@ python pipeline.py
 
 Télécharge, nettoie et fusionne toutes les sources → produit `data/clean/dataset_final.csv`.
 
-### 3. Entraîner les modèles Prophet
+### 3. Entraîner les modèles et comparer les performances
 
 ```bash
 python modele_prophet.py
+python modele_comparaison.py
 ```
 
-Entraîne un modèle par indicateur, génère les projections → produit `data/resultats/forecast_*.csv`.
+`modele_prophet.py` : entraîne Prophet par indicateur, génère les projections → `data/resultats/forecast_*.csv`.
+`modele_comparaison.py` : compare 3 modèles (Régression Linéaire, ARIMA, Prophet) en validation walk-forward → `data/resultats/comparaison_modeles.csv`.
 
 ### 4. Lancer le dashboard
 
@@ -49,7 +51,8 @@ jupyter notebook rapport_analytique.ipynb
 HackatonSupDeVinci/
 │
 ├── pipeline.py                  # Collecte et transformation des données
-├── modele_prophet.py            # Modélisation et projections (Prophet + MLflow)
+├── modele_prophet.py            # Projections long terme (Prophet + 3 scénarios GIEC + MLflow)
+├── modele_comparaison.py        # Comparaison Régression Linéaire / ARIMA / Prophet (walk-forward)
 ├── app.py                       # Dashboard Streamlit interactif
 ├── rapport_analytique.ipynb     # Analyse exploratoire et interprétation
 │
@@ -128,10 +131,16 @@ HackatonSupDeVinci/
 - **7 départements** Météo France : couvrent les grandes zones climatiques (Méditerranée, Atlantique, Nord, Est, Bassin parisien) sans télécharger les ~100 fichiers nationaux.
 - **Niveau de la mer** : centrage sur 1900 (valeur 1900 = 0 mm) pour afficher directement la hausse totale depuis 1900. Nécessaire car chaque marégraphe a un zéro physique local différent.
 
-### Modélisation (`modele_prophet.py`)
-- **Prophet (Meta)** : adapté aux séries temporelles avec tendance et saisonnalité annuelle.
-- **3 scénarios** calés sur les trajectoires GIEC : optimiste (+1.4°C en 2100), intermédiaire (+2.7°C), pessimiste (+4.4°C).
-- **MLflow** : traçabilité des expériences, métriques MAE/RMSE, artefacts (modèles, graphiques).
+### Modélisation (`modele_prophet.py` + `modele_comparaison.py`)
+- **Comparaison de 5 modèles** via validation walk-forward (entraînement sur le passé, évaluation sur le futur) :
+  - Régression Linéaire — baseline, tendance pure
+  - ARIMA(1,1,1) — séries temporelles classique, meilleur sur CO₂ à court terme (MAPE 0.22%)
+  - Prophet (Meta) — décomposition tendance/saisonnalité, meilleur sur température (MAPE 3.71%)
+  - Random Forest — ensemble de 200 arbres, capture les non-linéarités
+  - XGBoost — gradient boosting, très efficace sur données tabulaires
+- **Choix pour les projections long terme** : Prophet sur la température (gère les ruptures de tendance), régression linéaire sur les autres indicateurs (ARIMA diverge sur des horizons > 10 ans).
+- **3 scénarios GIEC** : optimiste (+1.4°C en 2100), intermédiaire (+2.7°C), pessimiste (+4.4°C).
+- **MLflow** : traçabilité des expériences, métriques MAE/RMSE, artefacts.
 
 ### Dashboard (`app.py`)
 - **Streamlit + Plotly** : visualisations interactives.
@@ -145,7 +154,8 @@ HackatonSupDeVinci/
 Le notebook [`rapport_analytique.ipynb`](rapport_analytique.ipynb) contient :
 - Analyse exploratoire des données (distributions, corrélations)
 - Interprétation des tendances observées
-- Validation des projections Prophet
+- Comparaison des 3 modèles prédictifs et justification des choix
+- Validation des projections et analyse des scénarios GIEC
 - Conclusions et recommandations
 
 ---

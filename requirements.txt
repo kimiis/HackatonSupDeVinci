@@ -10,3 +10,4 @@ prophet
 statsmodels
 scikit-learn
 mlflow
+xgboost

@@ -514,20 +514,23 @@ with tab5:
         df_comp = pd.read_csv(path_csv)
 
         # ── Explication des modèles ──────────────────────────────────────────
-        st.subheader("Les 3 modèles comparés")
-        c1, c2, c3 = st.columns(3)
+        st.subheader("Les 5 modèles comparés")
+        c1, c2, c3, c4, c5 = st.columns(5)
         with c1:
             st.markdown("**Régression Linéaire**")
-            st.markdown("Modèle le plus simple : une droite de tendance `y = a × année + b`. "
-                        "Rapide et explicable. Performant quand la tendance est constante.")
+            st.markdown("Droite de tendance `y = a × année + b`. Baseline simple, rapide et explicable.")
         with c2:
             st.markdown("**ARIMA(1,1,1)**")
-            st.markdown("Modèle classique de séries temporelles. Capture les corrélations "
-                        "entre années successives. Très efficace sur les séries régulières comme le CO₂.")
+            st.markdown("Séries temporelles classique. Capture les corrélations entre années successives.")
         with c3:
             st.markdown("**Prophet (Meta)**")
-            st.markdown("Modèle avancé de décomposition de tendance. Robuste aux valeurs "
-                        "manquantes et aux changements de tendance. Meilleur sur la température.")
+            st.markdown("Décomposition tendance + saisonnalité. Robuste aux ruptures de tendance.")
+        with c4:
+            st.markdown("**Random Forest**")
+            st.markdown("Ensemble de 200 arbres de décision. Capture les non-linéarités. Limite : extrapolation plate hors données.")
+        with c5:
+            st.markdown("**XGBoost**")
+            st.markdown("Gradient boosting séquentiel. Très efficace sur données tabulaires. Même limite d'extrapolation que RF.")
 
         st.divider()
 
@@ -540,6 +543,8 @@ with tab5:
             "regression_lineaire": "Régression Linéaire",
             "arima":               "ARIMA(1,1,1)",
             "prophet":             "Prophet",
+            "random_forest":       "Random Forest",
+            "xgboost":             "XGBoost",
         }
         df_comp["modele"] = df_comp["modele"].map(LABELS_MODELES).fillna(df_comp["modele"])
 
@@ -562,6 +567,8 @@ with tab5:
             "Régression Linéaire": "#60a5fa",
             "ARIMA(1,1,1)":        "#fb923c",
             "Prophet":             "#4ade80",
+            "Random Forest":       "#c084fc",
+            "XGBoost":             "#f472b6",
         }
         fig_comp = go.Figure()
         for modele in df_comp["modele"].unique():
@@ -573,12 +580,15 @@ with tab5:
                 marker_color=COULEURS_MODELES.get(modele, "#888"),
             ))
         fig_comp.update_layout(
-            template="plotly_dark", barmode="group", height=380,
+            template="plotly_dark", barmode="group", height=420,
             xaxis_title="Variable", yaxis_title="RMSE (plus bas = meilleur)",
-            legend=dict(orientation="h", y=-0.25),
-            margin=dict(l=40, r=20, t=10, b=80)
+            legend=dict(orientation="h", y=-0.28),
+            margin=dict(l=40, r=20, t=10, b=100)
         )
         st.plotly_chart(fig_comp, use_container_width=True)
+
+        st.caption("⚠️ Random Forest et XGBoost n'extrapolent pas au-delà des valeurs vues à l'entraînement "
+                   "— ils sont moins adaptés aux projections long terme que Prophet ou la régression linéaire.")
 
         # ── Meilleur modèle par variable ─────────────────────────────────────
         st.divider()

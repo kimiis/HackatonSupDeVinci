@@ -1,18 +1,26 @@
 # ==============================================================================
 # HACKATHON #26 - modele_comparaison.py
 #
-# Objectif : comparer 3 modèles prédictifs sur les indicateurs climatiques
+# Objectif : comparer 5 modèles prédictifs sur les indicateurs climatiques
 # et produire un tableau de performances (RMSE, MAE, MAPE).
 #
 # Modèles comparés :
 #   1. Régression Linéaire  — baseline simple (tendance pure)
 #   2. ARIMA(1,1,1)         — modèle classique de séries temporelles
 #   3. Prophet              — modèle avancé de Meta
+#   4. Random Forest        — ensemble d'arbres de décision
+#   5. XGBoost              — gradient boosting
+#
+# Note sur les modèles arbre (RF, XGBoost) :
+#   On utilise le numéro d'année comme seule feature, ce qui les rend comparables
+#   à la régression linéaire. Leur limite principale en séries temporelles est
+#   l'extrapolation : ils ne peuvent pas prédire au-delà du max/min vu à
+#   l'entraînement. Ils sont donc moins adaptés aux projections long terme.
 #
 # Ce fichier doit être lancé APRÈS pipeline.py et modele_prophet.py.
 #
 # INSTALLATION :
-#   pip install pandas numpy scikit-learn statsmodels prophet matplotlib mlflow
+#   pip install pandas numpy scikit-learn statsmodels prophet matplotlib mlflow xgboost
 # ==============================================================================
 
 import pandas as pd
@@ -23,9 +31,11 @@ import os
 import mlflow
 
 from sklearn.linear_model import LinearRegression
+from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 from statsmodels.tsa.arima.model import ARIMA
 from prophet import Prophet
+from xgboost import XGBRegressor
 
 warnings.filterwarnings("ignore")
 os.makedirs("data/resultats", exist_ok=True)
@@ -39,7 +49,6 @@ mlflow.set_experiment("hackathon26_comparaison_modeles")
 df = pd.read_csv("data/clean/dataset_final.csv")
 df["annee"] = pd.to_numeric(df["annee"], errors="coerce")
 
-# Variables à comparer (les plus longues et les plus représentatives)
 VARIABLES = {
     "temperature":  "temp_moy_france",
     "co2":          "co2_ppm",
@@ -47,10 +56,10 @@ VARIABLES = {
     "vendanges":    "jour_vendanges",
 }
 
-print("=" * 60)
+print("=" * 70)
 print("COMPARAISON DE MODELES PREDICTIFS")
-print("Modeles : Regression Lineaire | ARIMA(1,1,1) | Prophet")
-print("=" * 60)
+print("Modeles : Regression Lineaire | ARIMA | Prophet | Random Forest | XGBoost")
+print("=" * 70)
 
 
 # ==============================================================================
@@ -68,12 +77,12 @@ print("=" * 60)
 
 def walk_forward_validation(serie_annee, serie_y, initial_frac=0.70, horizon=5):
     """
-    Évalue 3 modèles par validation walk-forward.
+    Évalue 5 modèles par validation walk-forward.
 
     Paramètres :
         serie_annee  : array des années
         serie_y      : array des valeurs cibles
-        initial_frac : fraction des données pour le premier entraînement (0.70 = 70%)
+        initial_frac : fraction des données pour le premier entraînement
         horizon      : nombre d'années à prédire à chaque fold
 
     Retourne :
@@ -86,9 +95,10 @@ def walk_forward_validation(serie_annee, serie_y, initial_frac=0.70, horizon=5):
         "regression_lineaire": {"y_true": [], "y_pred": []},
         "arima":               {"y_true": [], "y_pred": []},
         "prophet":             {"y_true": [], "y_pred": []},
+        "random_forest":       {"y_true": [], "y_pred": []},
+        "xgboost":             {"y_true": [], "y_pred": []},
     }
 
-    # On avance d'un pas (1 an) à chaque fold
     for i in range(start, n - horizon + 1, horizon):
         y_train = serie_y[:i]
         y_test  = serie_y[i:i + horizon]
@@ -96,10 +106,9 @@ def walk_forward_validation(serie_annee, serie_y, initial_frac=0.70, horizon=5):
         x_test  = serie_annee[i:i + horizon].reshape(-1, 1)
 
         # ── Régression Linéaire ───────────────────────────────────────────────
-        # Modèle : y = a × annee + b
-        # C'est le modèle le plus simple : une droite de tendance.
+        # Modèle : y = a × annee + b — droite de tendance.
         # Avantage : rapide, explicable, bon pour les tendances monotones.
-        # Limite : ne capture pas les accélérations ou décélérations de tendance.
+        # Limite : ne capture pas les accélérations ou décélérations.
         try:
             reg = LinearRegression()
             reg.fit(x_train, y_train)
@@ -110,13 +119,9 @@ def walk_forward_validation(serie_annee, serie_y, initial_frac=0.70, horizon=5):
             pass
 
         # ── ARIMA(1,1,1) ─────────────────────────────────────────────────────
-        # ARIMA(p=1, d=1, q=1) :
-        #   p=1 : 1 terme autorégressif (la valeur dépend de t-1)
-        #   d=1 : différenciation d'ordre 1 (on modélise les variations, pas les niveaux)
-        #         → rend la série stationnaire (enlève la tendance)
-        #   q=1 : 1 terme de moyenne mobile (correction de l'erreur précédente)
+        # p=1 : terme autorégressif | d=1 : différenciation | q=1 : moyenne mobile
         # Avantage : capture la dynamique locale et les corrélations temporelles.
-        # Limite : suppose une structure linéaire, peut diverger sur long terme.
+        # Limite : peut diverger sur long terme.
         try:
             arima = ARIMA(y_train, order=(1, 1, 1))
             arima_fit = arima.fit()
@@ -127,9 +132,9 @@ def walk_forward_validation(serie_annee, serie_y, initial_frac=0.70, horizon=5):
             pass
 
         # ── Prophet ──────────────────────────────────────────────────────────
-        # Modèle de décomposition additive : tendance + saisonnalité + résidus.
+        # Décomposition additive : tendance + saisonnalité + résidus.
         # Avantage : robuste aux valeurs manquantes, gère les ruptures de tendance.
-        # Limite : plus lent à entraîner, boîte noire relative.
+        # Limite : plus lent à entraîner.
         try:
             annees_train = serie_annee[:i]
             ds_train = pd.to_datetime(annees_train.astype(int), format="%Y")
@@ -149,6 +154,37 @@ def walk_forward_validation(serie_annee, serie_y, initial_frac=0.70, horizon=5):
         except Exception:
             pass
 
+        # ── Random Forest ─────────────────────────────────────────────────────
+        # Ensemble de 200 arbres de décision entraînés sur des sous-échantillons.
+        # Avantage : robuste au bruit, capture les relations non-linéaires.
+        # Limite : pas de vrai mécanisme d'extrapolation — prédit une valeur
+        #   constante (max vu à l'entraînement) pour les années futures.
+        #   Moins adapté aux projections long terme que Prophet ou ARIMA.
+        try:
+            rf = RandomForestRegressor(n_estimators=200, random_state=42)
+            rf.fit(x_train, y_train)
+            preds_rf = rf.predict(x_test)
+            erreurs["random_forest"]["y_true"].extend(y_test)
+            erreurs["random_forest"]["y_pred"].extend(preds_rf)
+        except Exception:
+            pass
+
+        # ── XGBoost ───────────────────────────────────────────────────────────
+        # Gradient boosting : construction séquentielle d'arbres pour corriger
+        # les erreurs du modèle précédent.
+        # Avantage : très performant sur les données tabulaires, gère bien les
+        #   non-linéarités et les interactions.
+        # Limite : même problème d'extrapolation que Random Forest.
+        try:
+            xgb = XGBRegressor(n_estimators=200, learning_rate=0.05,
+                               max_depth=3, random_state=42, verbosity=0)
+            xgb.fit(x_train, y_train)
+            preds_xgb = xgb.predict(x_test)
+            erreurs["xgboost"]["y_true"].extend(y_test)
+            erreurs["xgboost"]["y_pred"].extend(preds_xgb)
+        except Exception:
+            pass
+
     # ── Calcul des métriques ──────────────────────────────────────────────────
     resultats = {}
     for modele, data in erreurs.items():
@@ -161,7 +197,6 @@ def walk_forward_validation(serie_annee, serie_y, initial_frac=0.70, horizon=5):
 
         rmse = np.sqrt(mean_squared_error(y_true, y_pred))
         mae  = mean_absolute_error(y_true, y_pred)
-        # MAPE : on évite la division par zéro
         mask = y_true != 0
         mape = np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask])) * 100 if mask.any() else None
 
@@ -190,7 +225,7 @@ for nom_var, col in VARIABLES.items():
         print(f"\n  [!] {nom_var} : seulement {len(serie)} points, ignore")
         continue
 
-    annees = serie["annee"].values.astype(float)
+    annees  = serie["annee"].values.astype(float)
     valeurs = serie[col].values.astype(float)
 
     print(f"\n  -> {nom_var} ({len(serie)} points : "
@@ -226,69 +261,64 @@ for nom_var, col in VARIABLES.items():
 df_comparaison = pd.DataFrame(tous_resultats)
 df_comparaison.to_csv("data/resultats/comparaison_modeles.csv", index=False)
 
-print("\n" + "=" * 60)
+print("\n" + "=" * 70)
 print("TABLEAU COMPARATIF — RMSE (plus bas = meilleur)")
-print("=" * 60)
-
+print("=" * 70)
 pivot_rmse = df_comparaison.pivot(index="variable", columns="modele", values="rmse")
 print(pivot_rmse.to_string())
 
-print("\n" + "=" * 60)
+print("\n" + "=" * 70)
 print("TABLEAU COMPARATIF — MAPE % (plus bas = meilleur)")
-print("=" * 60)
+print("=" * 70)
 pivot_mape = df_comparaison.pivot(index="variable", columns="modele", values="mape")
 print(pivot_mape.to_string())
 
 
 # ==============================================================================
-# GRAPHIQUE COMPARATIF — RMSE par variable et par modèle
+# GRAPHIQUE COMPARATIF
 # ==============================================================================
 
-df_plot = df_comparaison.dropna(subset=["rmse"])
+df_plot       = df_comparaison.dropna(subset=["rmse"])
 variables_dispo = df_plot["variable"].unique()
 modeles_dispo   = df_plot["modele"].unique()
-x = np.arange(len(variables_dispo))
-width = 0.25
-couleurs = {"regression_lineaire": "#60a5fa", "arima": "#fb923c", "prophet": "#4ade80"}
+n_modeles     = len(modeles_dispo)
+x     = np.arange(len(variables_dispo))
+width = 0.15
 
-fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+COULEURS = {
+    "regression_lineaire": "#60a5fa",
+    "arima":               "#fb923c",
+    "prophet":             "#4ade80",
+    "random_forest":       "#c084fc",
+    "xgboost":             "#f472b6",
+}
 
-# Graphique RMSE
-ax = axes[0]
-for i, modele in enumerate(modeles_dispo):
-    vals = [df_plot[(df_plot["variable"] == v) & (df_plot["modele"] == modele)]["rmse"].values
-            for v in variables_dispo]
-    vals = [v[0] if len(v) > 0 else 0 for v in vals]
-    ax.bar(x + i * width, vals, width, label=modele, color=couleurs.get(modele, "gray"))
-ax.set_xticks(x + width)
-ax.set_xticklabels(variables_dispo, rotation=15)
-ax.set_title("RMSE par modèle et par variable\n(plus bas = meilleur)")
-ax.set_ylabel("RMSE")
-ax.legend()
-ax.grid(axis="y", alpha=0.3)
+fig, axes = plt.subplots(1, 2, figsize=(16, 6))
 
-# Graphique MAE
-ax = axes[1]
-for i, modele in enumerate(modeles_dispo):
-    vals = [df_plot[(df_plot["variable"] == v) & (df_plot["modele"] == modele)]["mae"].values
-            for v in variables_dispo]
-    vals = [v[0] if len(v) > 0 else 0 for v in vals]
-    ax.bar(x + i * width, vals, width, label=modele, color=couleurs.get(modele, "gray"))
-ax.set_xticks(x + width)
-ax.set_xticklabels(variables_dispo, rotation=15)
-ax.set_title("MAE par modèle et par variable\n(plus bas = meilleur)")
-ax.set_ylabel("MAE")
-ax.legend()
-ax.grid(axis="y", alpha=0.3)
+for ax_idx, metric in enumerate(["rmse", "mae"]):
+    ax = axes[ax_idx]
+    for i, modele in enumerate(modeles_dispo):
+        vals = [df_plot[(df_plot["variable"] == v) & (df_plot["modele"] == modele)][metric].values
+                for v in variables_dispo]
+        vals = [v[0] if len(v) > 0 else 0 for v in vals]
+        offset = (i - n_modeles / 2) * width + width / 2
+        ax.bar(x + offset, vals, width, label=modele,
+               color=COULEURS.get(modele, "gray"))
+    ax.set_xticks(x)
+    ax.set_xticklabels(variables_dispo, rotation=15)
+    ax.set_title(f"{metric.upper()} par modèle et par variable\n(plus bas = meilleur)")
+    ax.set_ylabel(metric.upper())
+    ax.legend(fontsize=8)
+    ax.grid(axis="y", alpha=0.3)
 
-plt.suptitle("Comparaison des modèles prédictifs — Hackathon #26", fontsize=13)
+plt.suptitle("Comparaison des 5 modèles prédictifs — Hackathon #26", fontsize=13)
 plt.tight_layout()
 plt.savefig("data/resultats/comparaison_modeles.png", dpi=150)
 plt.close()
 
 print("\nGraphique : data/resultats/comparaison_modeles.png")
 print("CSV       : data/resultats/comparaison_modeles.csv")
-print("\n" + "=" * 60)
+print("\n" + "=" * 70)
 print("Meilleur modele par variable (RMSE) :")
 for var in df_plot["variable"].unique():
     df_v = df_plot[df_plot["variable"] == var].dropna(subset=["rmse"])
@@ -296,4 +326,4 @@ for var in df_plot["variable"].unique():
         meilleur = df_v.loc[df_v["rmse"].idxmin(), "modele"]
         rmse_val = df_v["rmse"].min()
         print(f"  {var:<20} -> {meilleur}  (RMSE={rmse_val:.4f})")
-print("=" * 60)
+print("=" * 70)
