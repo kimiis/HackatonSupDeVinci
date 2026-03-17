@@ -29,6 +29,7 @@ os.makedirs("data/resultats", exist_ok=True)
 
 # MLflow : toutes les runs sont regroupées dans une expérience nommée.
 # L'UI MLflow est accessible avec : mlflow ui  (http://localhost:5000)
+mlflow.set_tracking_uri("sqlite:///mlflow.db")
 mlflow.set_experiment("hackathon26_climat_france")
 
 

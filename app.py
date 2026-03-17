@@ -60,6 +60,11 @@ def load_scenarios():
     return pd.read_csv(path) if os.path.exists(path) else None
 
 @st.cache_data
+def load_walkforward():
+    path = "data/resultats/walkforward_preds.csv"
+    return pd.read_csv(path) if os.path.exists(path) else None
+
+@st.cache_data
 def load_ports():
     df_ports = pd.read_excel("data/raw/id_port_fr.xlsx")
     df_mer   = pd.read_csv("data/clean/niveau_mer.csv")
@@ -72,10 +77,11 @@ def load_ports():
                      "lon": row["Long"], "niveau_mm": niveau})
     return pd.DataFrame(rows)
 
-df        = load_historique()
-forecasts = load_forecasts()
-scenarios = load_scenarios()
-df_ports  = load_ports()
+df           = load_historique()
+forecasts    = load_forecasts()
+scenarios    = load_scenarios()
+df_ports     = load_ports()
+df_walkforward = load_walkforward()
 
 
 # ==============================================================================
@@ -98,9 +104,9 @@ with st.sidebar:
         options=["optimiste", "intermediaire", "pessimiste"],
         index=1,
         format_func=lambda x: {
-            "optimiste":     "Optimiste — +1.4°C en 2100",
-            "intermediaire": "Intermédiaire — +2.7°C en 2100",
-            "pessimiste":    "Pessimiste — +4.4°C en 2100"
+            "optimiste":     "Optimiste — +1.4°C supplémentaires d'ici 2100",
+            "intermediaire": "Intermédiaire — +2.7°C supplémentaires d'ici 2100",
+            "pessimiste":    "Pessimiste — +4.4°C supplémentaires d'ici 2100"
         }[x]
     )
 
@@ -431,13 +437,6 @@ with tab4:
                                   mode="lines", name="Mesures réelles",
                                   line=dict(color="white", width=2)))
 
-        if "temperature" in forecasts:
-            ff = forecasts["temperature"]
-            ff = ff[ff["annee"] > annee_recente]
-            fig4.add_trace(go.Scatter(x=ff["annee"], y=ff["yhat"],
-                                      mode="lines", name="Si la tendance continue",
-                                      line=dict(color="#60a5fa", dash="dot", width=1.5)))
-
         for sc, coul in COULEURS_SC.items():
             df_sc = scenarios[scenarios["scenario"] == sc]
             xs = [annee_recente] + df_sc[df_sc["annee"] > annee_recente]["annee"].tolist()
@@ -466,7 +465,7 @@ with tab4:
             row = df_sc[df_sc["annee"] <= annee_projection].iloc[-1]
             col_w.metric(LABELS_SC[sc],
                          f"{row['temp_proj_C']:.1f} °C",
-                         f"+{row['anomalie_C']:.2f}°C depuis 1900")
+                         f"+{row['anomalie_C']:.2f}°C au total depuis 1900–1920")
 
     st.divider()
     st.subheader("Autres indicateurs projetés")
@@ -532,13 +531,6 @@ with tab5:
             st.markdown("**XGBoost**")
             st.markdown("Gradient boosting séquentiel. Très efficace sur données tabulaires. Même limite d'extrapolation que RF.")
 
-        st.divider()
-
-        # ── Tableau des métriques ────────────────────────────────────────────
-        st.subheader("Performances — RMSE et MAPE par variable")
-        st.caption("RMSE : erreur en unité de la variable (plus bas = meilleur). "
-                   "MAPE : erreur en % (permet de comparer des variables d'unités différentes).")
-
         LABELS_MODELES = {
             "regression_lineaire": "Régression Linéaire",
             "arima":               "ARIMA(1,1,1)",
@@ -548,16 +540,126 @@ with tab5:
         }
         df_comp["modele"] = df_comp["modele"].map(LABELS_MODELES).fillna(df_comp["modele"])
 
-        pivot_rmse = df_comp.pivot(index="variable", columns="modele", values="rmse").round(4)
-        pivot_mape = df_comp.pivot(index="variable", columns="modele", values="mape").round(2)
+        st.divider()
 
-        col_r, col_m = st.columns(2)
-        with col_r:
-            st.markdown("**RMSE**")
-            st.dataframe(pivot_rmse, use_container_width=True)
-        with col_m:
-            st.markdown("**MAPE (%)**")
-            st.dataframe(pivot_mape, use_container_width=True)
+        # ── Walk-forward animé ────────────────────────────────────────────────
+        st.subheader("Walk-forward animé — comment le modèle apprend")
+        st.caption(
+            "Chaque fold entraîne le modèle sur les données jusqu'à une certaine année "
+            "et prédit les 5 années suivantes. Avance le slider pour voir l'amélioration "
+            "de la prédiction quand le modèle dispose de plus de données."
+        )
+
+        if df_walkforward is None:
+            st.info("Relance `python modele_comparaison.py` pour générer les données walk-forward.")
+        else:
+            COLMAP_WF = {
+                "temperature": "temp_moy_france",
+                "co2":         "co2_ppm",
+                "niveau_mer":  "niveau_mer_mm",
+                "vendanges":   "jour_vendanges",
+            }
+            LABELS_WF = {
+                "temperature": "Température (°C)",
+                "co2":         "CO₂ (ppm)",
+                "niveau_mer":  "Niveau de la mer (mm)",
+                "vendanges":   "Vendanges (jour de l'an)",
+            }
+
+            col_wf1, col_wf2 = st.columns(2)
+            var_wf = col_wf1.selectbox(
+                "Variable", list(COLMAP_WF.keys()), key="wf_var",
+                format_func=lambda x: LABELS_WF[x]
+            )
+            df_wf_var = df_walkforward[df_walkforward["variable"] == var_wf]
+            modeles_wf = df_wf_var["modele"].unique().tolist()
+            mod_wf = col_wf2.selectbox(
+                "Modèle", modeles_wf, key="wf_mod",
+                format_func=lambda x: LABELS_MODELES.get(x, x)
+            )
+
+            df_wf_vm = df_wf_var[df_wf_var["modele"] == mod_wf].copy()
+            nb_folds = int(df_wf_vm["fold"].max())
+            fold_sel = st.slider(
+                f"Fold — de 1 (peu de données) à {nb_folds} (toutes les données)",
+                1, nb_folds, 1, key="wf_fold"
+            )
+
+            df_fold = df_wf_vm[df_wf_vm["fold"] == fold_sel]
+            annee_split = int(df_fold["annee_fin_train"].iloc[0])
+            col_hist = COLMAP_WF[var_wf]
+
+            fig_wf = go.Figure()
+
+            if col_hist in df.columns:
+                df_hist = df[["annee", col_hist]].dropna()
+
+                # Données d'entraînement (avant le split)
+                df_train = df_hist[df_hist["annee"] <= annee_split]
+                fig_wf.add_trace(go.Scatter(
+                    x=df_train["annee"], y=df_train[col_hist],
+                    mode="lines", name="Données d'entraînement",
+                    line=dict(color="#60a5fa", width=2)
+                ))
+
+                # Données réelles après le split (non vues par le modèle)
+                df_after = df_hist[df_hist["annee"] > annee_split]
+                if not df_after.empty:
+                    fig_wf.add_trace(go.Scatter(
+                        x=df_after["annee"], y=df_after[col_hist],
+                        mode="lines", name="Réel (non vu à l'entraînement)",
+                        line=dict(color="white", width=1.5, dash="dot"),
+                        opacity=0.4
+                    ))
+
+            # Prédictions du modèle
+            fig_wf.add_trace(go.Scatter(
+                x=df_fold["annee"], y=df_fold["y_pred"],
+                mode="lines+markers",
+                name=f"Prédiction — {LABELS_MODELES.get(mod_wf, mod_wf)}",
+                line=dict(color="#f87171", width=2.5),
+                marker=dict(size=8, color="#f87171")
+            ))
+
+            # Points réels du test
+            fig_wf.add_trace(go.Scatter(
+                x=df_fold["annee"], y=df_fold["y_true"],
+                mode="markers", name="Valeurs réelles (test)",
+                marker=dict(size=11, color="white", symbol="circle",
+                            line=dict(color="#f87171", width=2))
+            ))
+
+            # Ligne verticale au point de split
+            fig_wf.add_vline(
+                x=annee_split, line_dash="dash", line_color="#f59e0b",
+                annotation_text=f"Entraîné jusqu'en {annee_split}",
+                annotation_font_color="#f59e0b"
+            )
+
+            annee_pred_debut = int(df_fold["annee"].min())
+            annee_pred_fin   = int(df_fold["annee"].max())
+            fig_wf.update_layout(
+                template="plotly_dark", height=430,
+                title=dict(
+                    text=(f"Fold {fold_sel}/{nb_folds} — Entraîné jusqu'en {annee_split}, "
+                          f"prédit {annee_pred_debut}–{annee_pred_fin}"),
+                    font=dict(size=13)
+                ),
+                xaxis_title="Année",
+                yaxis_title=LABELS_WF[var_wf],
+                legend=dict(orientation="h", y=-0.25),
+                margin=dict(l=40, r=20, t=60, b=80)
+            )
+            st.plotly_chart(fig_wf, use_container_width=True)
+
+            # Métriques du fold sélectionné
+            erreur_abs = (df_fold["y_pred"] - df_fold["y_true"]).abs()
+            rmse_fold  = float(np.sqrt((erreur_abs ** 2).mean()))
+            mae_fold   = float(erreur_abs.mean())
+            c1, c2, c3, _ = st.columns(4)
+            c1.metric("RMSE ce fold",   f"{rmse_fold:.4f}")
+            c2.metric("MAE ce fold",    f"{mae_fold:.4f}")
+            c3.metric("Points prédits", f"{len(df_fold)}")
 
         st.divider()
 
@@ -587,20 +689,23 @@ with tab5:
         )
         st.plotly_chart(fig_comp, use_container_width=True)
 
-        st.caption("⚠️ Random Forest et XGBoost n'extrapolent pas au-delà des valeurs vues à l'entraînement "
-                   "— ils sont moins adaptés aux projections long terme que Prophet ou la régression linéaire.")
-
-        # ── Meilleur modèle par variable ─────────────────────────────────────
         st.divider()
-        st.subheader("Meilleur modèle par variable")
-        for var in df_comp["variable"].unique():
-            df_v = df_comp[df_comp["variable"] == var].dropna(subset=["rmse"])
-            if not df_v.empty:
-                meilleur = df_v.loc[df_v["rmse"].idxmin(), "modele"]
-                rmse_val = df_v["rmse"].min()
-                mape_val = df_v.loc[df_v["rmse"].idxmin(), "mape"]
-                st.markdown(f"**{var}** → {meilleur} "
-                            f"(RMSE={rmse_val:.4f}, MAPE={mape_val:.2f}%)")
+
+        # ── Tableau des métriques ────────────────────────────────────────────
+        st.subheader("Performances — RMSE et MAPE par variable")
+        st.caption("RMSE : erreur en unité de la variable (plus bas = meilleur). "
+                   "MAPE : erreur en % (permet de comparer des variables d'unités différentes).")
+
+        pivot_rmse = df_comp.pivot(index="variable", columns="modele", values="rmse").round(4)
+        pivot_mape = df_comp.pivot(index="variable", columns="modele", values="mape").round(2)
+
+        col_r, col_m = st.columns(2)
+        with col_r:
+            st.markdown("**RMSE**")
+            st.dataframe(pivot_rmse, use_container_width=True)
+        with col_m:
+            st.markdown("**MAPE (%)**")
+            st.dataframe(pivot_mape, use_container_width=True)
 
 # ── TAB 6 : ALERTES ───────────────────────────────────────────────────────────
 

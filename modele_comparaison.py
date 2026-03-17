@@ -40,6 +40,7 @@ from xgboost import XGBRegressor
 warnings.filterwarnings("ignore")
 os.makedirs("data/resultats", exist_ok=True)
 
+mlflow.set_tracking_uri("sqlite:///mlflow.db")
 mlflow.set_experiment("hackathon26_comparaison_modeles")
 
 # ==============================================================================
@@ -86,7 +87,8 @@ def walk_forward_validation(serie_annee, serie_y, initial_frac=0.70, horizon=5):
         horizon      : nombre d'années à prédire à chaque fold
 
     Retourne :
-        dict {modele: {"rmse": float, "mae": float, "mape": float}}
+        resultats   : dict {modele: {"rmse": float, "mae": float, "mape": float}}
+        preds_folds : list de dicts avec les prédictions par fold (pour visualisation)
     """
     n = len(serie_y)
     start = int(n * initial_frac)
@@ -99,11 +101,17 @@ def walk_forward_validation(serie_annee, serie_y, initial_frac=0.70, horizon=5):
         "xgboost":             {"y_true": [], "y_pred": []},
     }
 
+    preds_folds = []
+    fold_num    = 0
+
     for i in range(start, n - horizon + 1, horizon):
-        y_train = serie_y[:i]
-        y_test  = serie_y[i:i + horizon]
-        x_train = serie_annee[:i].reshape(-1, 1)
-        x_test  = serie_annee[i:i + horizon].reshape(-1, 1)
+        fold_num       += 1
+        y_train         = serie_y[:i]
+        y_test          = serie_y[i:i + horizon]
+        x_train         = serie_annee[:i].reshape(-1, 1)
+        x_test          = serie_annee[i:i + horizon].reshape(-1, 1)
+        annee_fin_train = int(serie_annee[i - 1])
+        fold_preds      = {}
 
         # ── Régression Linéaire ───────────────────────────────────────────────
         # Modèle : y = a × annee + b — droite de tendance.
@@ -115,6 +123,7 @@ def walk_forward_validation(serie_annee, serie_y, initial_frac=0.70, horizon=5):
             preds_reg = reg.predict(x_test)
             erreurs["regression_lineaire"]["y_true"].extend(y_test)
             erreurs["regression_lineaire"]["y_pred"].extend(preds_reg)
+            fold_preds["regression_lineaire"] = preds_reg
         except Exception:
             pass
 
@@ -128,6 +137,7 @@ def walk_forward_validation(serie_annee, serie_y, initial_frac=0.70, horizon=5):
             preds_arima = arima_fit.forecast(steps=horizon)
             erreurs["arima"]["y_true"].extend(y_test)
             erreurs["arima"]["y_pred"].extend(preds_arima)
+            fold_preds["arima"] = preds_arima
         except Exception:
             pass
 
@@ -151,6 +161,7 @@ def walk_forward_validation(serie_annee, serie_y, initial_frac=0.70, horizon=5):
 
             erreurs["prophet"]["y_true"].extend(y_test)
             erreurs["prophet"]["y_pred"].extend(preds_prophet)
+            fold_preds["prophet"] = preds_prophet
         except Exception:
             pass
 
@@ -166,6 +177,7 @@ def walk_forward_validation(serie_annee, serie_y, initial_frac=0.70, horizon=5):
             preds_rf = rf.predict(x_test)
             erreurs["random_forest"]["y_true"].extend(y_test)
             erreurs["random_forest"]["y_pred"].extend(preds_rf)
+            fold_preds["random_forest"] = preds_rf
         except Exception:
             pass
 
@@ -182,8 +194,22 @@ def walk_forward_validation(serie_annee, serie_y, initial_frac=0.70, horizon=5):
             preds_xgb = xgb.predict(x_test)
             erreurs["xgboost"]["y_true"].extend(y_test)
             erreurs["xgboost"]["y_pred"].extend(preds_xgb)
+            fold_preds["xgboost"] = preds_xgb
         except Exception:
             pass
+
+        # Sauvegarde des prédictions de ce fold pour la visualisation
+        fold_annees = serie_annee[i:i + horizon].astype(int)
+        for j, (ann, ytrue) in enumerate(zip(fold_annees, y_test)):
+            for modele, preds in fold_preds.items():
+                preds_folds.append({
+                    "fold":            fold_num,
+                    "annee_fin_train": annee_fin_train,
+                    "annee":           int(ann),
+                    "y_true":          float(ytrue),
+                    "modele":          modele,
+                    "y_pred":          float(preds[j]),
+                })
 
     # ── Calcul des métriques ──────────────────────────────────────────────────
     resultats = {}
@@ -206,14 +232,15 @@ def walk_forward_validation(serie_annee, serie_y, initial_frac=0.70, horizon=5):
             "mape": round(mape, 2) if mape is not None else None,
         }
 
-    return resultats
+    return resultats, preds_folds
 
 
 # ==============================================================================
 # BOUCLE SUR TOUTES LES VARIABLES
 # ==============================================================================
 
-tous_resultats = []
+tous_resultats  = []
+all_walkforward = []
 
 for nom_var, col in VARIABLES.items():
     if col not in df.columns:
@@ -235,7 +262,10 @@ for nom_var, col in VARIABLES.items():
         mlflow.log_param("variable", col)
         mlflow.log_param("n_observations", len(serie))
 
-        resultats = walk_forward_validation(annees, valeurs)
+        resultats, preds_folds = walk_forward_validation(annees, valeurs)
+        for rec in preds_folds:
+            rec["variable"] = nom_var
+        all_walkforward.extend(preds_folds)
 
         for modele, metriques in resultats.items():
             rmse_str = f"{metriques['rmse']:.4f}" if metriques["rmse"] is not None else "N/A"
@@ -258,8 +288,10 @@ for nom_var, col in VARIABLES.items():
 # TABLEAU COMPARATIF FINAL
 # ==============================================================================
 
-df_comparaison = pd.DataFrame(tous_resultats)
+df_comparaison  = pd.DataFrame(tous_resultats)
+df_walkforward  = pd.DataFrame(all_walkforward)
 df_comparaison.to_csv("data/resultats/comparaison_modeles.csv", index=False)
+df_walkforward.to_csv("data/resultats/walkforward_preds.csv", index=False)
 
 print("\n" + "=" * 70)
 print("TABLEAU COMPARATIF — RMSE (plus bas = meilleur)")
@@ -315,6 +347,11 @@ plt.suptitle("Comparaison des 5 modèles prédictifs — Hackathon #26", fontsiz
 plt.tight_layout()
 plt.savefig("data/resultats/comparaison_modeles.png", dpi=150)
 plt.close()
+
+with mlflow.start_run(run_name="resultats_finaux"):
+    mlflow.log_artifact("data/resultats/comparaison_modeles.csv")
+    mlflow.log_artifact("data/resultats/comparaison_modeles.png")
+    mlflow.log_artifact("data/resultats/walkforward_preds.csv")
 
 print("\nGraphique : data/resultats/comparaison_modeles.png")
 print("CSV       : data/resultats/comparaison_modeles.csv")
