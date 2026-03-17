@@ -121,7 +121,8 @@ annee_recente = int(df_temp_completes["annee"].iloc[-1])
 hausse_temp   = temp_recente - baseline
 
 co2_actuel        = df["co2_ppm"].dropna().iloc[-1]        if "co2_ppm"           in df.columns else None
-niveau_actuel     = df["niveau_mer_mm"].dropna().iloc[-1]  if "niveau_mer_mm"     in df.columns else None
+ports_ok          = df_ports.dropna(subset=["niveau_mm"])
+niveau_actuel     = ports_ok["niveau_mm"].mean() if not ports_ok.empty else None
 empreinte_actuelle= df["empreinte_tCO2_hab"].dropna().iloc[-1] if "empreinte_tCO2_hab" in df.columns else None
 
 COULEURS_SC = {"optimiste": "#4ade80", "intermediaire": "#fb923c", "pessimiste": "#f87171"}
