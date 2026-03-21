@@ -4,6 +4,8 @@ __pycache__/
 .idea/
 *.egg-info/
 .claude
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/
 mlflow.db
 mlflow.db.bak
 mlflow_backup.db
