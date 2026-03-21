@@ -6,6 +6,7 @@ __pycache__/
 .claude
 .ipynb_checkpoints/
 **/.ipynb_checkpoints/
+rapport_analytique.ipynb
 mlflow.db
 mlflow.db.bak
 mlflow_backup.db
